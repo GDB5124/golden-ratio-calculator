@@ -18,13 +18,6 @@ const App = () => {
   const [isPhotoReady, setIsPhotoReady] = useState(false);
   const [showImageBounds, setShowImageBounds] = useState(false);
 
-  // Calculate distance between two points
-  const calculateDistance = (p1, p2) => {
-    const dx = p2.x - p1.x;
-    const dy = p2.y - p1.y;
-    return Math.sqrt(dx * dx + dy * dy);
-  };
-
   // Get ratio color based on golden ratio (1.618)
   const getRatioColor = useCallback((ratioValue) => {
     if (ratioValue === null) return 'bg-gray-200';
@@ -379,7 +372,7 @@ const App = () => {
     return () => {
       stopCamera();
     };
-  }, []);
+  }, [stopCamera]);
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4 font-sans">
