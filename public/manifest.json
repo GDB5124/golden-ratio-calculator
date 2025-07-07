@@ -1,0 +1,15 @@
+{
+  "short_name": "황금비율 측정기",
+  "name": "황금비율 측정기 - 이미지에서 두 거리의 비율을 측정하는 웹 애플리케이션",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#000000",
+  "background_color": "#ffffff"
+} 
