@@ -249,7 +249,7 @@ const App = () => {
   };
 
   // Stop camera
-  const stopCamera = () => {
+  const stopCamera = useCallback(() => {
     if (stream) {
       stream.getTracks().forEach(track => track.stop());
       setStream(null);
@@ -260,7 +260,7 @@ const App = () => {
         videoRef.current.onloadeddata = null;
       }
     }
-  };
+  }, [stream, videoRef]);
 
   // Take photo
   const takePhoto = () => {
