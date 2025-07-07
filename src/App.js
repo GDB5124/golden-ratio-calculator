@@ -1,110 +1,203 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 
-// Main App component for the ratio calculator
 const App = () => {
-  // Ref for the canvas element
+  // Refs
   const canvasRef = useRef(null);
-  // State for the 2D rendering context of the canvas
-  const [ctx, setCtx] = useState(null);
-  // State for the loaded image
-  const [image, setImage] = useState(null);
-  // State to store the clicked points on the canvas
-  const [points, setPoints] = useState([]); // Max 4 points: P1, P2, P3, P4
-  // State to store the calculated distances
-  const [distances, setDistances] = useState([]); // Max 2 distances: D1 (P1-P2), D2 (P3-P4)
-  // State for the calculated ratio
-  const [ratio, setRatio] = useState(null);
-  // State for the color indicator based on the ratio
-  const [ratioColor, setRatioColor] = useState('bg-gray-200'); // Default gray color
-  // State for messages to the user
-  const [message, setMessage] = useState('사진을 업로드하거나 카메라를 시작하여 시작하세요.');
-
-  // Ref for the video element to display camera feed
   const videoRef = useRef(null);
-  // State to hold the camera stream
+  
+  // State
+  const [image, setImage] = useState(null);
+  // 점 상태를 상대좌표로 저장
+  const [points, setPoints] = useState([]); // [{ relX, relY }]
+  const [distances, setDistances] = useState([]);
+  const [ratio, setRatio] = useState(null);
+  const [ratioColor, setRatioColor] = useState('bg-gray-200');
+  const [message, setMessage] = useState('사진을 업로드하거나 카메라를 시작하여 시작하세요.');
   const [stream, setStream] = useState(null);
-  // State to indicate if camera is active
   const [isCameraActive, setIsCameraActive] = useState(false);
-  // State to indicate if the photo can be taken (video is ready)
   const [isPhotoReady, setIsPhotoReady] = useState(false);
+  const [showImageBounds, setShowImageBounds] = useState(false);
 
+  // Calculate distance between two points
+  const calculateDistance = (p1, p2) => {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
 
-  // Initialize canvas context when component mounts or canvasRef changes
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (canvas) {
-      const context = canvas.getContext('2d');
-      setCtx(context);
+  // Get ratio color based on golden ratio (1.618)
+  const getRatioColor = useCallback((ratioValue) => {
+    if (ratioValue === null) return 'bg-gray-200';
+    
+    const goldenRatio = 1.618;
+    const difference = Math.abs(ratioValue - goldenRatio);
+    
+    if (difference <= 0.1) return 'bg-green-500';
+    if (difference <= 0.2) return 'bg-green-400';
+    if (difference <= 0.3) return 'bg-yellow-500';
+    if (difference <= 0.5) return 'bg-orange-500';
+    return 'bg-red-500';
+  }, []);
+
+  // drawImage 파라미터 계산 함수 (중복 방지)
+  const getDrawImageParams = (canvas, image) => {
+    const aspectRatio = image.width / image.height;
+    let drawWidth = canvas.width;
+    let drawHeight = canvas.width / aspectRatio;
+    if (drawHeight > canvas.height) {
+      drawHeight = canvas.height;
+      drawWidth = canvas.height * aspectRatio;
     }
-  }, [canvasRef]);
+    const offsetX = (canvas.width - drawWidth) / 2;
+    const offsetY = (canvas.height - drawHeight) / 2;
+    return { offsetX, offsetY, drawWidth, drawHeight };
+  };
 
-  // Function to draw everything on the canvas
+  // drawCanvas 함수
   const drawCanvas = useCallback(() => {
-    if (!ctx || !canvasRef.current) return;
-
     const canvas = canvasRef.current;
-    ctx.clearRect(0, 0, canvas.width, canvas.height); // Clear the canvas
-
-    // Draw the image if loaded
-    if (image) {
-      // Calculate aspect ratio to fit image within canvas without distortion
-      const aspectRatio = image.width / image.height;
-      let drawWidth = canvas.width;
-      let drawHeight = canvas.width / aspectRatio;
-
-      if (drawHeight > canvas.height) {
-        drawHeight = canvas.height;
-        drawWidth = canvas.height * aspectRatio;
-      }
-
-      // Center the image on the canvas
-      const offsetX = (canvas.width - drawWidth) / 2;
-      const offsetY = (canvas.height - drawHeight) / 2;
-
-      ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+    if (!canvas || !image) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    const { offsetX, offsetY, drawWidth, drawHeight } = getDrawImageParams(canvas, image);
+    ctx.drawImage(image, offsetX, offsetY, drawWidth, drawHeight);
+    if (showImageBounds) {
+      ctx.strokeStyle = '#FF0000';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]);
+      ctx.strokeRect(offsetX, offsetY, drawWidth, drawHeight);
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#FF0000';
+      ctx.fillRect(offsetX - 3, offsetY - 3, 6, 6);
+      ctx.fillRect(offsetX + drawWidth - 3, offsetY - 3, 6, 6);
+      ctx.fillRect(offsetX - 3, offsetY + drawHeight - 3, 6, 6);
+      ctx.fillRect(offsetX + drawWidth - 3, offsetY + drawHeight - 3, 6, 6);
     }
-
-    // Draw points and lines
     points.forEach((point, index) => {
-      // Draw point
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, 5, 0, Math.PI * 2); // Draw a circle for the point
-      ctx.fillStyle = '#FF0000'; // Red color for points
-      ctx.fill();
-      ctx.closePath();
-
-      // Draw point number
-      ctx.font = '14px Arial';
-      ctx.fillStyle = '#000000';
-      ctx.fillText(`P${index + 1}`, point.x + 8, point.y - 8);
-
-      // Draw lines between P1-P2 and P3-P4
-      if (index === 1 && points.length >= 2) {
+      if (typeof point.relX === 'number' && typeof point.relY === 'number') {
+        const x = offsetX + point.relX * drawWidth;
+        const y = offsetY + point.relY * drawHeight;
         ctx.beginPath();
-        ctx.moveTo(points[0].x, points[0].y);
-        ctx.lineTo(points[1].x, points[1].y);
-        ctx.strokeStyle = '#0000FF'; // Blue color for the first line
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        ctx.arc(x, y, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#FF0000';
+        ctx.fill();
         ctx.closePath();
-      } else if (index === 3 && points.length >= 4) {
-        ctx.beginPath();
-        ctx.moveTo(points[2].x, points[2].y);
-        ctx.lineTo(points[3].x, points[3].y);
-        ctx.strokeStyle = '#008000'; // Green color for the second line
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.closePath();
+        ctx.font = '14px Arial';
+        ctx.fillStyle = '#000000';
+        ctx.fillText(`P${index + 1}`, x + 8, y - 8);
+        if (index === 1 && points.length >= 2) {
+          const x0 = offsetX + points[0].relX * drawWidth;
+          const y0 = offsetY + points[0].relY * drawHeight;
+          ctx.beginPath();
+          ctx.moveTo(x0, y0);
+          ctx.lineTo(x, y);
+          ctx.strokeStyle = '#0000FF';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.closePath();
+        } else if (index === 3 && points.length >= 4) {
+          const x2 = offsetX + points[2].relX * drawWidth;
+          const y2 = offsetY + points[2].relY * drawHeight;
+          ctx.beginPath();
+          ctx.moveTo(x2, y2);
+          ctx.lineTo(x, y);
+          ctx.strokeStyle = '#008000';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.closePath();
+        }
       }
     });
-  }, [ctx, image, points]);
+  }, [image, points, showImageBounds]);
 
-  // Redraw canvas whenever points or image change
-  useEffect(() => {
-    drawCanvas();
-  }, [points, image, drawCanvas]);
+  // drawImage 영역 내 거리 계산
+  const calculateDistanceRel = (p1, p2, drawWidth, drawHeight) => {
+    const dx = (p1.relX - p2.relX) * drawWidth;
+    const dy = (p1.relY - p2.relY) * drawHeight;
+    return Math.sqrt(dx * dx + dy * dy);
+  };
 
-  // Function to handle image file selection
+  // Handle canvas click
+  const handleCanvasClick = (event) => {
+    console.log('캔버스 클릭 이벤트 발생');
+    console.log('image:', image);
+    console.log('canvasRef.current:', canvasRef.current);
+    
+    if (!image) {
+      console.log('이미지가 없음');
+      setMessage('먼저 사진을 업로드하거나 카메라로 사진을 찍으세요.');
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      console.log('캔버스 요소가 없음');
+      return;
+    }
+
+    const rect = canvas.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const clickY = event.clientY - rect.top;
+
+    console.log('클릭 좌표 (캔버스 기준):', { clickX, clickY });
+
+    // Calculate image dimensions on canvas (same as in drawCanvas)
+    const { offsetX, offsetY, drawWidth, drawHeight } = getDrawImageParams(canvas, image);
+
+    console.log('이미지 그리기 영역:', { offsetX, offsetY, drawWidth, drawHeight });
+
+    // Check if click is within the image area
+    if (clickX < offsetX || clickX > offsetX + drawWidth || 
+        clickY < offsetY || clickY > offsetY + drawHeight) {
+      console.log('클릭이 이미지 영역 밖임');
+      setMessage('이미지 영역 안을 클릭해주세요.');
+      return;
+    }
+
+    // Convert click coordinates to image coordinates
+    const relX = (clickX - offsetX) / drawWidth;
+    const relY = (clickY - offsetY) / drawHeight;
+
+    console.log('이미지 좌표:', { relX, relY });
+
+    // Convert back to canvas coordinates for consistent drawing
+    const canvasX = (relX * image.width / image.width) * drawWidth + offsetX;
+    const canvasY = (relY * image.height / image.height) * drawHeight + offsetY;
+
+    console.log('캔버스 좌표 (재계산):', { canvasX, canvasY });
+
+    // Use the recalculated canvas coordinates for drawing
+    const newPoint = { relX, relY };
+    console.log('새로운 점 (캔버스 좌표):', newPoint);
+    console.log('현재 점들:', points);
+
+    if (points.length < 4) {
+      const updatedPoints = [...points, newPoint];
+      console.log('업데이트된 점들:', updatedPoints);
+      setPoints(updatedPoints);
+
+      // Calculate distances
+      if (updatedPoints.length === 2) {
+        const d1 = calculateDistanceRel(updatedPoints[0], updatedPoints[1], drawWidth, drawHeight);
+        console.log('첫 번째 거리 계산:', d1);
+        setDistances([d1]);
+        setMessage('첫 번째 거리(P1-P2)가 기록되었습니다. 다음 두 점을 클릭하세요.');
+      } else if (updatedPoints.length === 4) {
+        const d2 = calculateDistanceRel(updatedPoints[2], updatedPoints[3], drawWidth, drawHeight);
+        console.log('두 번째 거리 계산:', d2);
+        setDistances([distances[0], d2]);
+        setMessage('두 번째 거리(P3-P4)가 기록되었습니다. 비율을 확인하세요.');
+      } else if (updatedPoints.length === 1) {
+        setMessage('두 번째 점을 클릭하여 첫 번째 거리를 측정하세요.');
+      } else if (updatedPoints.length === 3) {
+        setMessage('네 번째 점을 클릭하여 두 번째 거리를 측정하세요.');
+      }
+    } else {
+      setMessage('모든 점이 찍혔습니다. "점 다시 찍기" 버튼을 눌러 다시 시작하세요.');
+    }
+  };
+
+  // Handle image upload
   const handleImageUpload = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -112,140 +205,34 @@ const App = () => {
       reader.onload = (e) => {
         const img = new Image();
         img.onload = () => {
+          stopCamera();
           setImage(img);
-          // Set canvas dimensions to fit the image or a default size
-          const canvas = canvasRef.current;
-          if (canvas) {
-            // Set a max width for the canvas to be responsive
-            const maxWidth = Math.min(img.width, window.innerWidth * 0.8);
-            const maxHeight = Math.min(img.height, window.innerHeight * 0.6);
-
-            let newWidth = maxWidth;
-            let newHeight = (img.height / img.width) * newWidth;
-
-            if (newHeight > maxHeight) {
-              newHeight = maxHeight;
-              newWidth = (img.width / img.height) * newHeight;
-            }
-
-            canvas.width = newWidth;
-            canvas.height = newHeight;
-            drawCanvas(); // Redraw after setting dimensions
-            setMessage('사진이 업로드되었습니다. 점을 클릭하세요.');
-          }
+          setPoints([]);
+          setDistances([]);
+          setRatio(null);
+          setRatioColor('bg-gray-200');
+          setMessage('사진이 업로드되었습니다. 점을 클릭하세요.');
         };
         img.src = e.target.result;
       };
       reader.readAsDataURL(file);
-      stopCamera(); // Stop camera if a file is uploaded
-      // When a new file is uploaded, reset all points/distances
-      setPoints([]);
-      setDistances([]);
-      setRatio(null);
-      setRatioColor('bg-gray-200');
-      setIsPhotoReady(false); // Disable photo button if new image is loaded
     }
   };
 
-  // Calculate Euclidean distance between two points
-  const calculateDistance = (p1, p2) => {
-    const dx = p2.x - p1.x;
-    const dy = p2.y - p1.y;
-    return Math.sqrt(dx * dx + dy * dy);
-  };
-
-  // Determine the color based on the ratio
-  const getRatioColor = useCallback((ratioValue) => {
-    if (ratioValue === null) return 'bg-gray-200';
-    if (ratioValue > 3) return 'bg-red-500';
-    if (ratioValue >= 2) return 'bg-orange-500';
-    if (ratioValue >= 1.75) return 'bg-yellow-500';
-    if (ratioValue >= 1.5) return 'bg-green-500';
-    return 'bg-gray-200'; // Default for ratios below 1.5
-  }, []);
-
-  // Effect to update ratio and color when distances change
-  useEffect(() => {
-    if (distances.length === 2) {
-      const d1 = distances[0];
-      const d2 = distances[1];
-
-      // Calculate ratio ensuring it's always >= 1
-      const calculatedRatio = Math.max(d1, d2) / Math.min(d1, d2);
-      setRatio(calculatedRatio);
-      setRatioColor(getRatioColor(calculatedRatio));
-      setMessage('두 거리의 비율이 계산되었습니다.');
-    }
-  }, [distances, getRatioColor]);
-
-  // Handle click events on the canvas
-  const handleCanvasClick = (event) => {
-    if (!ctx || !image) {
-      setMessage('먼저 사진을 업로드하거나 카메라로 사진을 찍으세요.');
-      return;
-    }
-
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-
-    // Calculate click coordinates relative to the image on the canvas
-    const aspectRatio = image.width / image.height;
-    let drawWidth = canvas.width;
-    let drawHeight = canvas.width / aspectRatio;
-
-    if (drawHeight > canvas.height) {
-      drawHeight = canvas.height;
-      drawWidth = canvas.height * aspectRatio;
-    }
-
-    const offsetX = (canvas.width - drawWidth) / 2;
-    const offsetY = (canvas.height - drawHeight) / 2;
-
-    const x = (event.clientX - rect.left - offsetX) * (image.width / drawWidth);
-    const y = (event.clientY - rect.top - offsetY) * (image.height / drawHeight);
-
-    // Scale back to canvas coordinates for drawing
-    const scaledX = (event.clientX - rect.left);
-    const scaledY = (event.clientY - rect.top);
-
-    const newPoint = { x: scaledX, y: scaledY };
-
-    // Limit to 4 points (P1, P2, P3, P4)
-    if (points.length < 4) {
-      setPoints((prevPoints) => {
-        const updatedPoints = [...prevPoints, newPoint];
-
-        // Calculate distance after 2nd and 4th click
-        if (updatedPoints.length === 2) {
-          const dist1 = calculateDistance(updatedPoints[0], updatedPoints[1]);
-          setDistances([dist1]);
-          setMessage('첫 번째 거리(P1-P2)가 기록되었습니다. 다음 두 점을 클릭하세요.');
-        } else if (updatedPoints.length === 4) {
-          const dist2 = calculateDistance(updatedPoints[2], updatedPoints[3]);
-          setDistances((prevDistances) => [...prevDistances, dist2]);
-          setMessage('두 번째 거리(P3-P4)가 기록되었습니다. 비율을 확인하세요.');
-        } else if (updatedPoints.length === 1) {
-          setMessage('두 번째 점을 클릭하여 첫 번째 거리를 측정하세요.');
-        } else if (updatedPoints.length === 3) {
-          setMessage('네 번째 점을 클릭하여 두 번째 거리를 측정하세요.');
-        }
-
-        return updatedPoints;
-      });
-    } else {
-      setMessage('모든 점이 찍혔습니다. 초기화 버튼을 눌러 다시 시작하세요.');
-    }
-  };
-
-  // Function to start camera stream
+  // Start camera
   const startCamera = async () => {
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({ video: true });
+      const mediaStream = await navigator.mediaDevices.getUserMedia({ 
+        video: { 
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        } 
+      });
+      
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
-        videoRef.current.play(); // Start playing the video stream
+        videoRef.current.play();
 
-        // Add event listener to enable photo button when video is ready
         videoRef.current.onloadeddata = () => {
           if (videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0) {
             setIsPhotoReady(true);
@@ -255,16 +242,12 @@ const App = () => {
 
         setStream(mediaStream);
         setIsCameraActive(true);
-        setImage(null); // Clear any previously loaded image
-        // Reset points and distances when starting camera
+        setImage(null);
         setPoints([]);
         setDistances([]);
         setRatio(null);
         setRatioColor('bg-gray-200');
         setMessage('카메라가 활성화되었습니다. 비디오 로딩 중...');
-      } else {
-        console.error('Video element ref is null.');
-        setMessage('카메라를 시작할 수 없습니다. 잠시 후 다시 시도하세요.');
       }
     } catch (err) {
       console.error('Error accessing camera:', err);
@@ -272,88 +255,131 @@ const App = () => {
     }
   };
 
-  // Function to stop camera stream
+  // Stop camera
   const stopCamera = () => {
     if (stream) {
       stream.getTracks().forEach(track => track.stop());
       setStream(null);
       setIsCameraActive(false);
-      setIsPhotoReady(false); // Disable photo button when camera stops
+      setIsPhotoReady(false);
       if (videoRef.current) {
-        videoRef.current.srcObject = null; // Clear video source
-        videoRef.current.onloadeddata = null; // Remove event listener
+        videoRef.current.srcObject = null;
+        videoRef.current.onloadeddata = null;
       }
-      setMessage('카메라가 중지되었습니다.');
     }
   };
 
-  // Function to take a photo from the camera feed
+  // Take photo
   const takePhoto = () => {
-    if (videoRef.current && ctx) {
-      const video = videoRef.current;
-      // Check if video is ready to be drawn and has valid dimensions
-      if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
-        const canvas = canvasRef.current;
+    if (!videoRef.current) return;
 
-        // Create a temporary canvas for capturing the image to avoid affecting the display canvas
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = video.videoWidth;
-        tempCanvas.height = video.videoHeight;
-        const tempCtx = tempCanvas.getContext('2d');
+    const video = videoRef.current;
+    if (video.readyState >= 2 && video.videoWidth > 0 && video.videoHeight > 0) {
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = video.videoWidth;
+      tempCanvas.height = video.videoHeight;
+      const tempCtx = tempCanvas.getContext('2d');
 
-        // Draw video frame onto temporary canvas
-        tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+      tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+      const imageDataUrl = tempCanvas.toDataURL('image/png');
 
-        // Get image data from temporary canvas
-        const imageDataUrl = tempCanvas.toDataURL('image/png');
-
-        // Create a new Image object from the captured data
-        const img = new Image();
-        img.onload = () => {
-          setImage(img); // Set the new image to display
-          stopCamera(); // Stop camera after taking photo
-
-          // Reset points and distances for the new image, but keep the image itself
-          setPoints([]);
-          setDistances([]);
-          setRatio(null);
-          setRatioColor('bg-gray-200');
-          setMessage('사진이 촬영되었습니다. 점을 클릭하세요.');
-        };
-        img.src = imageDataUrl; // Set image source to trigger onload
-
-      } else {
-        setMessage('카메라가 아직 준비되지 않았거나 유효한 비디오 프레임이 없습니다. 잠시 후 다시 시도하세요.');
-      }
+      const img = new Image();
+      img.onload = () => {
+        stopCamera();
+        setImage(img);
+        setPoints([]);
+        setDistances([]);
+        setRatio(null);
+        setRatioColor('bg-gray-200');
+        setMessage('사진이 촬영되었습니다. 점을 클릭하세요.');
+      };
+      img.src = imageDataUrl;
     } else {
-      setMessage('카메라가 활성화되지 않았거나 준비되지 않았습니다.');
+      setMessage('카메라가 아직 준비되지 않았습니다. 잠시 후 다시 시도하세요.');
     }
   };
 
-  // Function to reset the application state completely
+  // Reset points only
+  const resetPoints = () => {
+    setPoints([]);
+    setDistances([]);
+    setRatio(null);
+    setRatioColor('bg-gray-200');
+    setMessage('점이 초기화되었습니다. 다시 점을 클릭하세요.');
+  };
+
+  // Reset everything
   const resetState = () => {
-    stopCamera(); // Ensure camera is stopped
-    setImage(null); // Clear the image
+    stopCamera();
+    setImage(null);
     setPoints([]);
     setDistances([]);
     setRatio(null);
     setRatioColor('bg-gray-200');
     setMessage('사진을 업로드하거나 카메라를 시작하여 시작하세요.');
-    if (ctx && canvasRef.current) {
-      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-      // Reset canvas to default placeholder size if no image
-      canvasRef.current.width = 600;
-      canvasRef.current.height = 400;
-    }
   };
 
-  // Cleanup camera stream when component unmounts
+  // Update canvas when image or points change
+  useEffect(() => {
+    console.log('useEffect: 이미지 또는 점 변경 감지');
+    console.log('image:', image);
+    console.log('points:', points);
+    
+    if (image) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        console.log('캔버스 크기 조정 시작');
+        const maxWidth = Math.min(image.width, window.innerWidth * 0.8);
+        const maxHeight = Math.min(image.height, window.innerHeight * 0.6);
+
+        let newWidth = maxWidth;
+        let newHeight = (image.height / image.width) * newWidth;
+
+        if (newHeight > maxHeight) {
+          newHeight = maxHeight;
+          newWidth = (image.width / image.height) * newHeight;
+        }
+
+        console.log('새로운 캔버스 크기:', newWidth, 'x', newHeight);
+        canvas.width = newWidth;
+        canvas.height = newHeight;
+        
+        // Draw after a short delay to ensure canvas is ready
+        setTimeout(() => {
+          console.log('setTimeout에서 drawCanvas 호출');
+          drawCanvas();
+        }, 50);
+      } else {
+        console.log('캔버스 요소를 찾을 수 없음');
+      }
+    } else {
+      console.log('이미지가 없음');
+    }
+  }, [image, points, drawCanvas]);
+
+  // Update ratio when distances change
+  useEffect(() => {
+    if (distances.length === 2) {
+      const d1 = distances[0];
+      const d2 = distances[1];
+
+      if (d1 > 0 && d2 > 0) {
+        const calculatedRatio = Math.max(d1, d2) / Math.min(d1, d2);
+        setRatio(calculatedRatio);
+        setRatioColor(getRatioColor(calculatedRatio));
+        setMessage('두 거리의 비율이 계산되었습니다.');
+      }
+    } else if (distances.length === 1) {
+      setMessage('첫 번째 거리가 측정되었습니다. 다음 두 점을 클릭하세요.');
+    }
+  }, [distances, getRatioColor]);
+
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopCamera();
     };
-  }, [stream]); // Dependency on stream to ensure cleanup when stream changes or component unmounts
-
+  }, []);
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-center p-4 font-sans">
@@ -389,7 +415,7 @@ const App = () => {
               <>
                 <button
                   onClick={takePhoto}
-                  disabled={!isPhotoReady} // Disable if photo is not ready
+                  disabled={!isPhotoReady}
                   className={`font-semibold py-2 px-6 rounded-full shadow-md transition duration-300 ease-in-out transform ${
                     isPhotoReady ? 'bg-green-500 hover:bg-green-600 hover:scale-105' : 'bg-green-300 cursor-not-allowed'
                   } text-white`}
@@ -408,37 +434,39 @@ const App = () => {
           <p className="text-sm text-gray-500 mt-2">{message}</p>
         </div>
 
-        {/* Video Feed (always rendered, visibility controlled by CSS) */}
+        {/* Video Feed */}
         <div className={`flex justify-center mb-6 border-2 border-gray-300 rounded-lg overflow-hidden ${isCameraActive ? 'block' : 'hidden'}`}>
           <video
             ref={videoRef}
             autoPlay
             playsInline
             className="w-full h-auto max-w-full"
-            style={{ maxWidth: '600px', maxHeight: '400px' }} // Max dimensions for video feed
+            style={{ maxWidth: '600px', maxHeight: '400px' }}
           ></video>
         </div>
 
-        {/* Canvas Area (when image is loaded and camera is not active) */}
-        {!isCameraActive && image && (
-          <div className="flex justify-center mb-6 border-2 border-gray-300 rounded-lg overflow-hidden">
+        {/* Canvas Area */}
+        {image && (
+          <div className="flex justify-center mb-6 border-2 border-gray-300 rounded-lg overflow-hidden relative">
             <canvas
               ref={canvasRef}
               onClick={handleCanvasClick}
               className="bg-gray-200 cursor-crosshair max-w-full h-auto"
-              // Set initial dimensions, will be adjusted on image load
               width="600"
               height="400"
             ></canvas>
+            <div className="absolute top-2 left-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
+              이미지 영역 안을 클릭하세요
+            </div>
           </div>
         )}
-        {/* Placeholder for canvas when no image and no camera */}
-        {!isCameraActive && !image && (
+        
+        {/* Placeholder */}
+        {!image && !isCameraActive && (
           <div className="flex justify-center items-center mb-6 border-2 border-gray-300 rounded-lg overflow-hidden bg-gray-200 text-gray-500" style={{ width: '600px', height: '400px' }}>
             사진이 표시될 영역
           </div>
         )}
-
 
         {/* Measurement Display */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 text-center">
@@ -467,12 +495,68 @@ const App = () => {
             </p>
           </div>
           <p className="text-sm text-gray-600 mt-3">
-            (1.618에 가까울수록 초록색)
+            (황금비율 1.618에 가까울수록 초록색)
           </p>
         </div>
 
-        {/* Reset Button */}
-        <div className="flex justify-center">
+        {/* Control Buttons */}
+        <div className="flex justify-center space-x-4">
+          {image && (
+            <button
+              onClick={resetPoints}
+              className="bg-yellow-500 hover:bg-yellow-600 text-white font-semibold py-2 px-6 rounded-full shadow-md transition duration-300 ease-in-out transform hover:scale-105"
+            >
+              점 다시 찍기
+            </button>
+          )}
+          <button
+            onClick={() => {
+              console.log('=== 디버그 정보 ===');
+              console.log('image:', image);
+              if (image) {
+                console.log('원본 이미지 크기:', image.width, 'x', image.height);
+                console.log('이미지 비율:', image.width / image.height);
+              }
+              console.log('points:', points);
+              console.log('distances:', distances);
+              console.log('ratio:', ratio);
+              console.log('canvasRef.current:', canvasRef.current);
+              if (canvasRef.current) {
+                console.log('캔버스 크기:', canvasRef.current.width, 'x', canvasRef.current.height);
+              }
+              if (image && canvasRef.current) {
+                // Calculate image dimensions on canvas
+                const aspectRatio = image.width / image.height;
+                let drawWidth = canvasRef.current.width;
+                let drawHeight = canvasRef.current.width / aspectRatio;
+
+                if (drawHeight > canvasRef.current.height) {
+                  drawHeight = canvasRef.current.height;
+                  drawWidth = canvasRef.current.height * aspectRatio;
+                }
+
+                const offsetX = (canvasRef.current.width - drawWidth) / 2;
+                const offsetY = (canvasRef.current.height - drawHeight) / 2;
+
+                console.log('이미지 그리기 영역:', { offsetX, offsetY, drawWidth, drawHeight });
+                console.log('강제로 drawCanvas 호출');
+                drawCanvas();
+              }
+            }}
+            className="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-6 rounded-full shadow-md transition duration-300 ease-in-out transform hover:scale-105"
+          >
+            디버그
+          </button>
+          {image && (
+            <button
+              onClick={() => setShowImageBounds(!showImageBounds)}
+              className={`font-semibold py-2 px-6 rounded-full shadow-md transition duration-300 ease-in-out transform hover:scale-105 ${
+                showImageBounds ? 'bg-red-500 hover:bg-red-600' : 'bg-purple-500 hover:bg-purple-600'
+              } text-white`}
+            >
+              {showImageBounds ? '경계 숨기기' : '경계 표시'}
+            </button>
+          )}
           <button
             onClick={resetState}
             className="bg-gray-500 hover:bg-gray-600 text-white font-semibold py-2 px-6 rounded-full shadow-md transition duration-300 ease-in-out transform hover:scale-105"
