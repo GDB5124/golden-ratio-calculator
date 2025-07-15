@@ -133,35 +133,43 @@ const App = () => {
     const clickY = event.clientY - rect.top;
 
     console.log('클릭 좌표 (캔버스 기준):', { clickX, clickY });
+    console.log('캔버스 실제 크기:', { width: canvas.width, height: canvas.height });
+    console.log('캔버스 표시 크기:', { width: rect.width, height: rect.height });
 
     // Calculate image dimensions on canvas (same as in drawCanvas)
     const { offsetX, offsetY, drawWidth, drawHeight } = getDrawImageParams(canvas, image);
 
     console.log('이미지 그리기 영역:', { offsetX, offsetY, drawWidth, drawHeight });
 
+    // 스케일 팩터 계산 (실제 캔버스 크기와 표시 크기의 비율)
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    
+    console.log('스케일 팩터:', { scaleX, scaleY });
+
+    // 스케일된 클릭 좌표 계산
+    const scaledClickX = clickX * scaleX;
+    const scaledClickY = clickY * scaleY;
+    
+    console.log('스케일된 클릭 좌표:', { scaledClickX, scaledClickY });
+
     // Check if click is within the image area
-    if (clickX < offsetX || clickX > offsetX + drawWidth || 
-        clickY < offsetY || clickY > offsetY + drawHeight) {
+    if (scaledClickX < offsetX || scaledClickX > offsetX + drawWidth || 
+        scaledClickY < offsetY || scaledClickY > offsetY + drawHeight) {
       console.log('클릭이 이미지 영역 밖임');
       setMessage('이미지 영역 안을 클릭해주세요.');
       return;
     }
 
     // Convert click coordinates to image coordinates
-    const relX = (clickX - offsetX) / drawWidth;
-    const relY = (clickY - offsetY) / drawHeight;
+    const relX = (scaledClickX - offsetX) / drawWidth;
+    const relY = (scaledClickY - offsetY) / drawHeight;
 
     console.log('이미지 좌표:', { relX, relY });
 
-    // Convert back to canvas coordinates for consistent drawing
-    const canvasX = (relX * image.width / image.width) * drawWidth + offsetX;
-    const canvasY = (relY * image.height / image.height) * drawHeight + offsetY;
-
-    console.log('캔버스 좌표 (재계산):', { canvasX, canvasY });
-
     // Use the recalculated canvas coordinates for drawing
     const newPoint = { relX, relY };
-    console.log('새로운 점 (캔버스 좌표):', newPoint);
+    console.log('새로운 점 (상대좌표):', newPoint);
     console.log('현재 점들:', points);
 
     if (points.length < 4) {
@@ -260,7 +268,7 @@ const App = () => {
         videoRef.current.onloadeddata = null;
       }
     }
-  }, [stream, videoRef]);
+  }, [stream]);
 
   // Take photo
   const takePhoto = () => {
@@ -322,8 +330,11 @@ const App = () => {
       const canvas = canvasRef.current;
       if (canvas) {
         console.log('캔버스 크기 조정 시작');
-        const maxWidth = Math.min(image.width, window.innerWidth * 0.8);
-        const maxHeight = Math.min(image.height, window.innerHeight * 0.6);
+        
+        // 모바일 화면에 최적화된 크기 계산
+        const isMobile = window.innerWidth <= 768;
+        const maxWidth = isMobile ? window.innerWidth * 0.9 : Math.min(image.width, window.innerWidth * 0.8);
+        const maxHeight = isMobile ? window.innerHeight * 0.4 : Math.min(image.height, window.innerHeight * 0.6);
 
         let newWidth = maxWidth;
         let newHeight = (image.height / image.width) * newWidth;
@@ -383,7 +394,7 @@ const App = () => {
 
         {/* Image Upload and Camera Section */}
         <div className="mb-6 flex flex-col items-center space-y-4">
-          <div className="flex space-x-4">
+          <div className="flex flex-wrap justify-center gap-4">
             <label
               htmlFor="imageUpload"
               className="cursor-pointer bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-6 rounded-full shadow-md transition duration-300 ease-in-out transform hover:scale-105"
@@ -424,7 +435,7 @@ const App = () => {
               </>
             )}
           </div>
-          <p className="text-sm text-gray-500 mt-2">{message}</p>
+          <p className="text-sm text-gray-500 mt-2 text-center">{message}</p>
         </div>
 
         {/* Video Feed */}
@@ -444,9 +455,63 @@ const App = () => {
             <canvas
               ref={canvasRef}
               onClick={handleCanvasClick}
+              onTouchStart={(e) => {
+                e.preventDefault();
+                const touch = e.touches[0];
+                const rect = canvasRef.current.getBoundingClientRect();
+                const clickX = touch.clientX - rect.left;
+                const clickY = touch.clientY - rect.top;
+                
+                // 터치 이벤트 처리
+                
+                // handleCanvasClick 함수를 직접 호출
+                if (canvasRef.current && image) {
+                  const canvas = canvasRef.current;
+                  const rect = canvas.getBoundingClientRect();
+                  const scaledClickX = clickX * (canvas.width / rect.width);
+                  const scaledClickY = clickY * (canvas.height / rect.height);
+                  
+                  console.log('터치 좌표:', { clickX, clickY });
+                  console.log('스케일된 터치 좌표:', { scaledClickX, scaledClickY });
+                  
+                  const { offsetX, offsetY, drawWidth, drawHeight } = getDrawImageParams(canvas, image);
+                  
+                  if (scaledClickX >= offsetX && scaledClickX <= offsetX + drawWidth && 
+                      scaledClickY >= offsetY && scaledClickY <= offsetY + drawHeight) {
+                    
+                    const relX = (scaledClickX - offsetX) / drawWidth;
+                    const relY = (scaledClickY - offsetY) / drawHeight;
+                    
+                    const newPoint = { relX, relY };
+                    console.log('터치로 추가된 점:', newPoint);
+                    
+                    if (points.length < 4) {
+                      const updatedPoints = [...points, newPoint];
+                      setPoints(updatedPoints);
+                      
+                      if (updatedPoints.length === 2) {
+                        const d1 = calculateDistanceRel(updatedPoints[0], updatedPoints[1], drawWidth, drawHeight);
+                        setDistances([d1]);
+                        setMessage('첫 번째 거리(P1-P2)가 기록되었습니다. 다음 두 점을 클릭하세요.');
+                      } else if (updatedPoints.length === 4) {
+                        const d2 = calculateDistanceRel(updatedPoints[2], updatedPoints[3], drawWidth, drawHeight);
+                        setDistances([distances[0], d2]);
+                        setMessage('두 번째 거리(P3-P4)가 기록되었습니다. 비율을 확인하세요.');
+                      } else if (updatedPoints.length === 1) {
+                        setMessage('두 번째 점을 클릭하여 첫 번째 거리를 측정하세요.');
+                      } else if (updatedPoints.length === 3) {
+                        setMessage('네 번째 점을 클릭하여 두 번째 거리를 측정하세요.');
+                      }
+                    } else {
+                      setMessage('모든 점이 찍혔습니다. "점 다시 찍기" 버튼을 눌러 다시 시작하세요.');
+                    }
+                  } else {
+                    setMessage('이미지 영역 안을 클릭해주세요.');
+                  }
+                }
+              }}
               className="bg-gray-200 cursor-crosshair max-w-full h-auto"
-              width="600"
-              height="400"
+              style={{ maxWidth: '100%', height: 'auto' }}
             ></canvas>
             <div className="absolute top-2 left-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded text-xs">
               이미지 영역 안을 클릭하세요
@@ -456,7 +521,7 @@ const App = () => {
         
         {/* Placeholder */}
         {!image && !isCameraActive && (
-          <div className="flex justify-center items-center mb-6 border-2 border-gray-300 rounded-lg overflow-hidden bg-gray-200 text-gray-500" style={{ width: '600px', height: '400px' }}>
+          <div className="flex justify-center items-center mb-6 border-2 border-gray-300 rounded-lg overflow-hidden bg-gray-200 text-gray-500" style={{ width: '100%', maxWidth: '600px', height: '400px' }}>
             사진이 표시될 영역
           </div>
         )}
@@ -493,7 +558,7 @@ const App = () => {
         </div>
 
         {/* Control Buttons */}
-        <div className="flex justify-center space-x-4">
+        <div className="flex flex-wrap justify-center gap-4">
           {image && (
             <button
               onClick={resetPoints}
@@ -509,13 +574,21 @@ const App = () => {
               if (image) {
                 console.log('원본 이미지 크기:', image.width, 'x', image.height);
                 console.log('이미지 비율:', image.width / image.height);
+                console.log('이미지 소스:', image.src.substring(0, 50) + '...');
               }
               console.log('points:', points);
               console.log('distances:', distances);
               console.log('ratio:', ratio);
               console.log('canvasRef.current:', canvasRef.current);
               if (canvasRef.current) {
-                console.log('캔버스 크기:', canvasRef.current.width, 'x', canvasRef.current.height);
+                const canvas = canvasRef.current;
+                const rect = canvas.getBoundingClientRect();
+                console.log('캔버스 실제 크기:', canvas.width, 'x', canvas.height);
+                console.log('캔버스 표시 크기:', rect.width, 'x', rect.height);
+                console.log('스케일 팩터:', {
+                  x: canvas.width / rect.width,
+                  y: canvas.height / rect.height
+                });
               }
               if (image && canvasRef.current) {
                 // Calculate image dimensions on canvas
@@ -532,6 +605,7 @@ const App = () => {
                 const offsetY = (canvasRef.current.height - drawHeight) / 2;
 
                 console.log('이미지 그리기 영역:', { offsetX, offsetY, drawWidth, drawHeight });
+                console.log('이미지 영역 비율:', drawWidth / drawHeight);
                 console.log('강제로 drawCanvas 호출');
                 drawCanvas();
               }
