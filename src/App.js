@@ -17,6 +17,7 @@ const App = () => {
   const [isCameraActive, setIsCameraActive] = useState(false);
   const [isPhotoReady, setIsPhotoReady] = useState(false);
   const [showImageBounds, setShowImageBounds] = useState(false);
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
 
   // Get ratio color based on golden ratio (1.618)
   const getRatioColor = useCallback((ratioValue) => {
@@ -45,6 +46,19 @@ const App = () => {
     const offsetY = (canvas.height - drawHeight) / 2;
     return { offsetX, offsetY, drawWidth, drawHeight };
   };
+
+  // 터치 디바이스 감지
+  useEffect(() => {
+    const checkTouchDevice = () => {
+      const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      setIsTouchDevice(hasTouch);
+      console.log('터치 디바이스 감지:', hasTouch);
+    };
+    
+    checkTouchDevice();
+    window.addEventListener('resize', checkTouchDevice);
+    return () => window.removeEventListener('resize', checkTouchDevice);
+  }, []);
 
   // drawCanvas 함수
   const drawCanvas = useCallback(() => {
@@ -454,7 +468,6 @@ const App = () => {
           <div className="flex justify-center mb-6 border-2 border-gray-300 rounded-lg overflow-hidden relative">
             <canvas
               ref={canvasRef}
-              onClick={handleCanvasClick}
               onTouchStart={(e) => {
                 e.preventDefault();
                 const touch = e.touches[0];
@@ -463,8 +476,6 @@ const App = () => {
                 const clickY = touch.clientY - rect.top;
                 
                 // 터치 이벤트 처리
-                
-                // handleCanvasClick 함수를 직접 호출
                 if (canvasRef.current && image) {
                   const canvas = canvasRef.current;
                   const rect = canvas.getBoundingClientRect();
@@ -508,6 +519,12 @@ const App = () => {
                   } else {
                     setMessage('이미지 영역 안을 클릭해주세요.');
                   }
+                }
+              }}
+              onMouseDown={(e) => {
+                // 터치 디바이스가 아닌 경우에만 마우스 클릭 처리
+                if (!isTouchDevice) {
+                  handleCanvasClick(e);
                 }
               }}
               className="bg-gray-200 cursor-crosshair max-w-full h-auto"
